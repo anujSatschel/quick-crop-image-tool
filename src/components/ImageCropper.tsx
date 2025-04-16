@@ -61,6 +61,7 @@ export const ImageCropper = ({
       image.src = url;
     });
 
+  // The fixed implementation of the image cropping function
   const getCroppedImg = async () => {
     try {
       if (!src || !croppedAreaPixels || !file) return;
@@ -73,15 +74,29 @@ export const ImageCropper = ({
         throw new Error("No 2d context");
       }
 
-      // Set canvas size to the cropped size
-      canvas.width = croppedAreaPixels.width;
-      canvas.height = croppedAreaPixels.height;
-
-      // Draw the rotated and cropped image
+      // Calculate the dimensions we need to ensure the entire rotated image fits on the canvas
+      const rotRad = (rotation * Math.PI) / 180;
+      
+      // Determine the maximum dimensions needed after rotation
+      const maxWidth = Math.abs(Math.cos(rotRad) * croppedAreaPixels.width) + 
+                       Math.abs(Math.sin(rotRad) * croppedAreaPixels.height);
+      const maxHeight = Math.abs(Math.sin(rotRad) * croppedAreaPixels.width) + 
+                        Math.abs(Math.cos(rotRad) * croppedAreaPixels.height);
+      
+      // Set canvas size to accommodate the rotated image dimensions
+      canvas.width = maxWidth;
+      canvas.height = maxHeight;
+      
+      // Clear the canvas with a transparent background
+      ctx.fillStyle = "rgba(0, 0, 0, 0)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Translate to center, rotate, and translate back
       ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((rotation * Math.PI) / 180);
-      ctx.translate(-canvas.width / 2, -canvas.height / 2);
-
+      ctx.rotate(rotRad);
+      ctx.translate(-croppedAreaPixels.width / 2, -croppedAreaPixels.height / 2);
+      
+      // Draw the image with proper cropping
       ctx.drawImage(
         image,
         croppedAreaPixels.x,
@@ -93,22 +108,45 @@ export const ImageCropper = ({
         croppedAreaPixels.width,
         croppedAreaPixels.height
       );
-
+      
+      // Create a second canvas for the final image with the correct dimensions
+      const finalCanvas = document.createElement("canvas");
+      finalCanvas.width = croppedAreaPixels.width;
+      finalCanvas.height = croppedAreaPixels.height;
+      const finalCtx = finalCanvas.getContext("2d");
+      
+      if (!finalCtx) {
+        throw new Error("No 2d context for final canvas");
+      }
+      
+      // Draw the rotated image onto the final canvas
+      finalCtx.drawImage(
+        canvas, 
+        (canvas.width - croppedAreaPixels.width) / 2,
+        (canvas.height - croppedAreaPixels.height) / 2,
+        croppedAreaPixels.width,
+        croppedAreaPixels.height,
+        0,
+        0,
+        croppedAreaPixels.width,
+        croppedAreaPixels.height
+      );
+      
       // Create circular mask if cropShape is round
       if (cropShape === "round") {
-        ctx.globalCompositeOperation = "destination-in";
-        ctx.beginPath();
-        ctx.arc(
-          canvas.width / 2,
-          canvas.height / 2,
-          Math.min(canvas.width, canvas.height) / 2,
+        finalCtx.globalCompositeOperation = "destination-in";
+        finalCtx.beginPath();
+        finalCtx.arc(
+          finalCanvas.width / 2,
+          finalCanvas.height / 2,
+          Math.min(finalCanvas.width, finalCanvas.height) / 2,
           0,
           2 * Math.PI
         );
-        ctx.fill();
+        finalCtx.fill();
       }
 
-      const base64Image = canvas.toDataURL("image/jpeg");
+      const base64Image = finalCanvas.toDataURL("image/jpeg");
 
       // Convert base64 to Blob and create a File
       const response = await fetch(base64Image);
