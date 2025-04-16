@@ -61,7 +61,7 @@ export const ImageCropper = ({
       image.src = url;
     });
 
-  // Completely rewritten image cropping function that correctly handles rotation
+  // Completely rewritten image cropping function to correctly handle rotation
   const getCroppedImg = async () => {
     try {
       if (!src || !croppedAreaPixels || !file) return;
@@ -69,48 +69,54 @@ export const ImageCropper = ({
       // Create an image element from the source
       const image = await createImage(src);
       
-      // Create a temporary canvas that's large enough for any rotation
+      // Create a canvas that's large enough for any rotation
+      const canvas = document.createElement("canvas");
+      // Use a larger size to accommodate rotation
       const maxSize = Math.max(image.width, image.height) * 2;
-      const tempCanvas = document.createElement("canvas");
-      tempCanvas.width = maxSize;
-      tempCanvas.height = maxSize;
-      const tempCtx = tempCanvas.getContext("2d");
+      canvas.width = maxSize;
+      canvas.height = maxSize;
+      const ctx = canvas.getContext("2d");
       
-      if (!tempCtx) {
-        throw new Error("No 2d context for temp canvas");
+      if (!ctx) {
+        throw new Error("No 2d context");
       }
 
-      // Clear the canvas
-      tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
+      // Move to center, rotate, and draw
+      ctx.fillStyle = "rgba(0, 0, 0, 0)"; // Transparent background
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
       
-      // Move to center, rotate, and move back
-      tempCtx.save();
-      tempCtx.translate(maxSize / 2, maxSize / 2);
-      tempCtx.rotate((rotation * Math.PI) / 180);
-      tempCtx.translate(-image.width / 2, -image.height / 2);
+      // Calculate the center position for the image
+      const centerX = canvas.width / 2;
+      const centerY = canvas.height / 2;
       
-      // Draw the full image at the center
-      tempCtx.drawImage(image, 0, 0);
-      tempCtx.restore();
+      // Translate to center, rotate, then translate back
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate((rotation * Math.PI) / 180);
+      ctx.translate(-image.width / 2, -image.height / 2);
       
-      // Now create the final canvas for the cropped image
-      const finalCanvas = document.createElement("canvas");
-      finalCanvas.width = croppedAreaPixels.width;
-      finalCanvas.height = croppedAreaPixels.height;
-      const finalCtx = finalCanvas.getContext("2d", { willReadFrequently: true });
+      // Draw the image at the calculated position
+      ctx.drawImage(image, 0, 0);
+      ctx.restore();
       
-      if (!finalCtx) {
-        throw new Error("No 2d context for final canvas");
+      // Now create a second canvas for the final cropped image
+      const croppedCanvas = document.createElement("canvas");
+      croppedCanvas.width = croppedAreaPixels.width;
+      croppedCanvas.height = croppedAreaPixels.height;
+      const croppedCtx = croppedCanvas.getContext("2d");
+      
+      if (!croppedCtx) {
+        throw new Error("No 2d context for cropped canvas");
       }
       
-      // Calculate where the crop area is located relative to the center of the temp canvas
-      const cropX = (maxSize - image.width) / 2 + croppedAreaPixels.x;
-      const cropY = (maxSize - image.height) / 2 + croppedAreaPixels.y;
+      // Calculate where the crop area is located in the rotated image
+      const cropX = centerX - image.width / 2 + croppedAreaPixels.x;
+      const cropY = centerY - image.height / 2 + croppedAreaPixels.y;
       
-      // Draw only the cropped portion of the temp canvas onto the final canvas
-      finalCtx.drawImage(
-        tempCanvas,
-        cropX, 
+      // Draw only the cropped portion onto the second canvas
+      croppedCtx.drawImage(
+        canvas,
+        cropX,
         cropY,
         croppedAreaPixels.width,
         croppedAreaPixels.height,
@@ -122,28 +128,26 @@ export const ImageCropper = ({
       
       // If cropShape is round, apply a circular mask
       if (cropShape === "round") {
-        finalCtx.globalCompositeOperation = "destination-in";
-        finalCtx.beginPath();
-        finalCtx.arc(
-          finalCanvas.width / 2,
-          finalCanvas.height / 2,
-          Math.min(finalCanvas.width, finalCanvas.height) / 2,
+        croppedCtx.globalCompositeOperation = "destination-in";
+        croppedCtx.beginPath();
+        croppedCtx.arc(
+          croppedCanvas.width / 2,
+          croppedCanvas.height / 2,
+          Math.min(croppedCanvas.width, croppedCanvas.height) / 2,
           0,
           2 * Math.PI
         );
-        finalCtx.fill();
+        croppedCtx.fill();
       }
       
       // Convert to base64
-      const base64Image = finalCanvas.toDataURL(file.type || "image/jpeg");
+      const base64Image = croppedCanvas.toDataURL(file.type || "image/jpeg");
       
-      // Convert base64 to Blob and create a File
-      const response = await fetch(base64Image);
-      const blob = await response.blob();
-      
-      // Determine the original file type
-      const fileType = file.type || "image/jpeg"; // Default to jpeg if type is unknown
-      const croppedFile = new File([blob], "cropped-" + file.name, { type: fileType });
+      // Convert base64 to File
+      const res = await fetch(base64Image);
+      const blob = await res.blob();
+      const fileName = file.name ? `cropped-${file.name}` : "cropped-image.jpg";
+      const croppedFile = new File([blob], fileName, { type: file.type || "image/jpeg" });
 
       onSuccess({ base64: base64Image, file: croppedFile });
       onOpenChange(false);
