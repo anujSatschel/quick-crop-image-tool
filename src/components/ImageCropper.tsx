@@ -61,69 +61,57 @@ export const ImageCropper = ({
       image.src = url;
     });
 
-  // The fixed implementation of the image cropping function
+  // Completely rewritten image cropping function that correctly handles rotation
   const getCroppedImg = async () => {
     try {
       if (!src || !croppedAreaPixels || !file) return;
 
+      // Create an image element from the source
       const image = await createImage(src);
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-
-      if (!ctx) {
-        throw new Error("No 2d context");
+      
+      // Create a temporary canvas that's large enough for any rotation
+      const maxSize = Math.max(image.width, image.height) * 2;
+      const tempCanvas = document.createElement("canvas");
+      tempCanvas.width = maxSize;
+      tempCanvas.height = maxSize;
+      const tempCtx = tempCanvas.getContext("2d");
+      
+      if (!tempCtx) {
+        throw new Error("No 2d context for temp canvas");
       }
 
-      // Calculate the dimensions we need to ensure the entire rotated image fits on the canvas
-      const rotRad = (rotation * Math.PI) / 180;
+      // Clear the canvas
+      tempCtx.clearRect(0, 0, tempCanvas.width, tempCanvas.height);
       
-      // Determine the maximum dimensions needed after rotation
-      const maxWidth = Math.abs(Math.cos(rotRad) * croppedAreaPixels.width) + 
-                       Math.abs(Math.sin(rotRad) * croppedAreaPixels.height);
-      const maxHeight = Math.abs(Math.sin(rotRad) * croppedAreaPixels.width) + 
-                        Math.abs(Math.cos(rotRad) * croppedAreaPixels.height);
+      // Move to center, rotate, and move back
+      tempCtx.save();
+      tempCtx.translate(maxSize / 2, maxSize / 2);
+      tempCtx.rotate((rotation * Math.PI) / 180);
+      tempCtx.translate(-image.width / 2, -image.height / 2);
       
-      // Set canvas size to accommodate the rotated image dimensions
-      canvas.width = maxWidth;
-      canvas.height = maxHeight;
+      // Draw the full image at the center
+      tempCtx.drawImage(image, 0, 0);
+      tempCtx.restore();
       
-      // Clear the canvas with a transparent background
-      ctx.fillStyle = "rgba(0, 0, 0, 0)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Translate to center, rotate, and translate back
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate(rotRad);
-      ctx.translate(-croppedAreaPixels.width / 2, -croppedAreaPixels.height / 2);
-      
-      // Draw the image with proper cropping
-      ctx.drawImage(
-        image,
-        croppedAreaPixels.x,
-        croppedAreaPixels.y,
-        croppedAreaPixels.width,
-        croppedAreaPixels.height,
-        0,
-        0,
-        croppedAreaPixels.width,
-        croppedAreaPixels.height
-      );
-      
-      // Create a second canvas for the final image with the correct dimensions
+      // Now create the final canvas for the cropped image
       const finalCanvas = document.createElement("canvas");
       finalCanvas.width = croppedAreaPixels.width;
       finalCanvas.height = croppedAreaPixels.height;
-      const finalCtx = finalCanvas.getContext("2d");
+      const finalCtx = finalCanvas.getContext("2d", { willReadFrequently: true });
       
       if (!finalCtx) {
         throw new Error("No 2d context for final canvas");
       }
       
-      // Draw the rotated image onto the final canvas
+      // Calculate where the crop area is located relative to the center of the temp canvas
+      const cropX = (maxSize - image.width) / 2 + croppedAreaPixels.x;
+      const cropY = (maxSize - image.height) / 2 + croppedAreaPixels.y;
+      
+      // Draw only the cropped portion of the temp canvas onto the final canvas
       finalCtx.drawImage(
-        canvas, 
-        (canvas.width - croppedAreaPixels.width) / 2,
-        (canvas.height - croppedAreaPixels.height) / 2,
+        tempCanvas,
+        cropX, 
+        cropY,
         croppedAreaPixels.width,
         croppedAreaPixels.height,
         0,
@@ -132,7 +120,7 @@ export const ImageCropper = ({
         croppedAreaPixels.height
       );
       
-      // Create circular mask if cropShape is round
+      // If cropShape is round, apply a circular mask
       if (cropShape === "round") {
         finalCtx.globalCompositeOperation = "destination-in";
         finalCtx.beginPath();
@@ -145,9 +133,10 @@ export const ImageCropper = ({
         );
         finalCtx.fill();
       }
-
-      const base64Image = finalCanvas.toDataURL("image/jpeg");
-
+      
+      // Convert to base64
+      const base64Image = finalCanvas.toDataURL(file.type || "image/jpeg");
+      
       // Convert base64 to Blob and create a File
       const response = await fetch(base64Image);
       const blob = await response.blob();
